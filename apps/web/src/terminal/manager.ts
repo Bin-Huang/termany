@@ -309,7 +309,10 @@ function getSession(id: string): Session {
     if (replaying) pendingOutput.push(data);
     else term.write(data);
   });
-  backend.onExit(() => term.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n"));
+  backend.onExit((reason) => {
+    const message = reason ? `[session ended: ${reason}]` : "[session ended]";
+    term.write(`\r\n\x1b[2m${message}\x1b[0m\r\n`);
+  });
   term.onData((data) => {
     if (IME_DEBUG) imeLog(`→PTY ${JSON.stringify(data)}`);
     backend.write(data);

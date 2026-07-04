@@ -98,7 +98,10 @@ function defaultShell(): string {
 }
 
 const SHELL = defaultShell();
-const SHELL_ARGS = IS_WIN ? ["-NoLogo"] : ["-l"];
+// Windows PowerShell profiles commonly initialize prompt tooling, package
+// managers, network drives, or Conda. In a headless packaged app that can turn
+// a new terminal into a minutes-long hang before the interactive prompt exists.
+const SHELL_ARGS = IS_WIN ? ["-NoLogo", "-NoProfile"] : ["-l"];
 
 type ClientMessage =
   | { type: "input"; data: string }
