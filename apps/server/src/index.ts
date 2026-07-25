@@ -471,10 +471,50 @@ function flushScroll(): void {
 
 setInterval(flushScroll, 10_000).unref();
 
+/**
+ * This server is unauthenticated and local-only, and it hands out powerful
+ * capabilities: a WebSocket spawns a login shell (arbitrary command execution)
+ * and /api/fs/* reads and writes arbitrary paths. A browser enforces no
+ * same-origin policy on those for us — any web page the user opens can issue
+ * cross-origin requests to ws://localhost:5174 and http://localhost:5174, so
+ * `Access-Control-Allow-Origin: *` plus no WebSocket origin check meant any
+ * site could quietly get RCE or read/write the user's files while the app ran.
+ *
+ * The only legitimate callers are the app's own webview and a local dev
+ * frontend, so we gate on the Origin header: Tauri's packaged webview
+ * (tauri://localhost, or http(s)://tauri.localhost on Windows) and loopback
+ * hosts only. Non-browser callers (native code, curl) send no Origin and have
+ * no SOP to bypass, so they're left alone.
+ */
+function isAllowedOrigin(origin: string | undefined | null): boolean {
+  if (!origin) return true; // non-browser caller — nothing to spoof past
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false; // malformed Origin — a browser never sends one, so refuse
+  }
+  if (url.protocol === "tauri:" && url.hostname === "localhost") return true;
+  if (url.hostname === "tauri.localhost") return true; // Windows webview
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  return loopback && (url.protocol === "http:" || url.protocol === "https:");
+}
+
 // One HTTP server hosts both the WebSocket upgrade (PTY sessions) and a small
 // JSON API (POST /api/theme — AI theme generation, key stays server-side).
 const http = createServer((req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (!isAllowedOrigin(origin)) {
+    // Reject a foreign site before any handler runs — no CORS grant, no
+    // filesystem access, no shell. (See isAllowedOrigin above.)
+    res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden origin");
+    return;
+  }
+  // Echo the specific caller instead of "*": a request with credentials never
+  // gets a wildcard grant, and foreign origins (already refused above) never
+  // receive a permissive header at all.
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Image-Type");
 
@@ -937,7 +977,20 @@ http.on("error", (err: NodeJS.ErrnoException) => {
   throw err;
 });
 
-const wss = new WebSocketServer({ server: http });
+const wss = new WebSocketServer({
+  server: http,
+  // A WebSocket spawns a shell, so it needs the same origin gate as the HTTP
+  // API — the browser sends Origin on the upgrade, but only the server can act
+  // on it. Reject the handshake for any foreign site. (See isAllowedOrigin.)
+  verifyClient: ({ origin, req }, done) => {
+    if (isAllowedOrigin(origin ?? req.headers.origin)) {
+      done(true);
+      return;
+    }
+    console.warn(`[termany] rejected websocket from origin: ${origin ?? "(none)"}`);
+    done(false, 403, "forbidden origin");
+  },
+});
 
 let connCount = 0;
 
