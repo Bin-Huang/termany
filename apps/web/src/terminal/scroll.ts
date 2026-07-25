@@ -29,8 +29,11 @@ export async function loadSnapshots(): Promise<void> {
  * used because plain fetch is dropped from unload handlers; the blob is
  * text/plain so the cross-origin beacon needs no CORS preflight.
  */
+let scrollSyncStarted = false;
+
 export function startScrollSync(): void {
-  if (isDemo) return;
+  if (isDemo || scrollSyncStarted) return;
+  scrollSyncStarted = true;
   const flush = () => {
     const blob = new Blob([JSON.stringify({ screens: finalScreens() })], { type: "text/plain" });
     navigator.sendBeacon?.(apiPath("/api/scroll/flush"), blob);

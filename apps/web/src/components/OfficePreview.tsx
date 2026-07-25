@@ -47,6 +47,12 @@ const DOCX_STYLE = `
   h1, h2, h3, h4 { line-height: 1.3; }
 `;
 
+const XLSX_STYLE = `
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1a1a1a; background: #fff; margin: 0; padding: 8px; }
+  table { border-collapse: collapse; font-size: 13px; }
+  td, th { border: 1px solid #d0d0d0; padding: 3px 8px; white-space: nowrap; }
+`;
+
 export function DocxPreview({ src }: { src: string }) {
   const fetchState = useArrayBuffer(src);
   const [html, setHtml] = useState<string | null>(null);
@@ -141,7 +147,21 @@ export function XlsxPreview({ src }: { src: string }) {
           ))}
         </div>
       )}
-      <div className="xlsx-sheet-body" dangerouslySetInnerHTML={{ __html: tableHtml[activeSheet] ?? "" }} />
+      {/*
+        Render the SheetJS table inside a sandboxed iframe, NOT via
+        dangerouslySetInnerHTML into the app DOM. sheet_to_html emits hyperlink
+        targets (and rich-text cells) unescaped, so a crafted cell can inject
+        markup that runs script in the privileged app origin. sandbox="" (no
+        allow-scripts, no allow-same-origin) neutralises it, matching how
+        DocxPreview handles untrusted document HTML.
+      */}
+      <iframe
+        className="xlsx-sheet-body"
+        title="Spreadsheet preview"
+        sandbox=""
+        style={{ border: 0, width: "100%" }}
+        srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>${XLSX_STYLE}</style></head><body>${tableHtml[activeSheet] ?? ""}</body></html>`}
+      />
     </div>
   );
 }

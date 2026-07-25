@@ -54,6 +54,22 @@ function isHtmlPath(path: string): boolean {
   return /\.(html|htm)$/i.test(path);
 }
 
+/**
+ * Only let web/mail links reach an anchor's href. Markdown is rendered into the
+ * app's own (privileged) DOM, and React does NOT strip `javascript:` hrefs — it
+ * renders them and a click runs script in-origin. Drop anything that isn't
+ * http(s)/mailto so an untrusted `.md` can't smuggle an executable link.
+ */
+function safeHref(url: string): string | undefined {
+  try {
+    const scheme = new URL(url, "http://localhost").protocol;
+    if (scheme === "http:" || scheme === "https:" || scheme === "mailto:") return url;
+  } catch {
+    /* unparseable — treat as unsafe */
+  }
+  return undefined;
+}
+
 function inlineMarkdown(text: string): Array<string | JSX.Element> {
   const out: Array<string | JSX.Element> = [];
   const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
@@ -67,8 +83,9 @@ function inlineMarkdown(text: string): Array<string | JSX.Element> {
     else if (token.startsWith("*")) out.push(<em key={i++}>{token.slice(1, -1)}</em>);
     else {
       const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+      const href = link ? safeHref(link[2]) : undefined;
       out.push(
-        <a key={i++} href={link?.[2] ?? "#"} target="_blank" rel="noreferrer">
+        <a key={i++} href={href} target="_blank" rel="noreferrer">
           {link?.[1] ?? token}
         </a>
       );
